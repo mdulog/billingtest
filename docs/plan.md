@@ -1,0 +1,76 @@
+# Scope: Multi-Tenant Usage & Billing Schema (2–4 hours, target ~3h)
+
+Spec: `docs/requirements/takehome_requirements.md`
+
+Target commit cadence: one commit per phase minimum, 2–3 within Phases 1–3.
+This file is itself commit #1 — the point is to think through the scope and
+tradeoffs up front, then let the commit history tell the story of the build.
+
+---
+
+## Phase 0 — Setup (15 min)
+- `npm init`, TypeScript, `pg` (or `postgres`/`drizzle`/`prisma` — pick one now, don't relitigate later), a test runner (`vitest` or `node:test`), `docker-compose.yml` for local Postgres.
+- Drop `usage_events.json` into the repo once available.
+- Commit: `chore: project scaffold`
+
+**Judgment call:** raw `pg` + hand-written SQL vs. an ORM/query builder. For a
+3-hour exercise, raw SQL or a thin query builder (Kysely) shows schema
+instincts more directly than an ORM abstracting it away — worth a line in
+the write-up either way.
+
+## Phase 1 — Schema + migrations (35–45 min)
+- Look at the actual JSON first — don't design blind. Note which fields are
+  per-event vs. per-customer (e.g. `plan`, `user_email` may belong on a
+  `customers`/`users` table, not repeated per event).
+- Write migrations: `customers`, `users` (if warranted), `events` (or
+  `usage_events`), maybe `endpoints` as a lookup if normalized FKs are
+  worth it vs. a plain text column — state the tradeoff, don't resolve it
+  perfectly.
+- Decide the multi-tenancy mechanism now, since it drives every query after
+  this: `customer_id` FK + app-level filtering, vs. Postgres RLS. FK +
+  always-filter-in-query is defensible for a 3-hour exercise; RLS is the
+  "what I'd do at scale" answer for the write-up.
+- Index the columns the endpoints will filter/sort on (`customer_id`,
+  `occurred_at`, `endpoint`) — decide now while the query shapes are fresh.
+- Commit: `feat: initial schema and migrations`
+
+## Phase 2 — Ingestion (40–50 min)
+- Read JSON, validate/normalize, upsert customers, insert events.
+- Decide the dedupe key (e.g. hash of customer_id+occurred_at+endpoint+metadata,
+  or an explicit `event_id` if one exists in the data — check first) and the
+  malformed-record policy (skip + log vs. quarantine table). Pick one, state
+  why in the write-up, don't build both.
+- Wrap the batch insert in a transaction.
+- Commit: `feat: usage_events ingestion`
+
+## Phase 3 — HTTP API (45–60 min)
+Three endpoints, all scoped by `customer_id` and date range:
+- `GET /customers/:id/usage?from=&to=` — summary (event counts, total duration_ms)
+- `GET /customers/top?from=&to=&limit=` — ranked usage across customers
+- `GET /customers/:id/endpoints?from=&to=` — per-endpoint breakdown
+- Validate `from`/`to` and `customer_id` at the boundary; return 400 on bad
+  input, not a raw DB error.
+- Commit: `feat: billing query endpoints`
+
+## Phase 4 — Tests (30–40 min)
+- Ingestion: dedupe logic and malformed-record handling — these are the
+  parts with actual decisions in them, test those first if time is short.
+- At least one endpoint against a real DB (or test container), asserting on
+  response shape and values, not just status 200.
+- Commit: `test: ingestion and endpoint coverage`
+
+## Phase 5 — Write-up (30–40 min)
+Answer the four questions from decisions already made and pointable to in
+the diff — mine the commit messages rather than writing from scratch.
+Keep "what I'd do next" honest and short (2–3 items).
+- Commit: `docs: write-up`
+
+---
+
+## If time runs short, cut in this order
+1. Top-customers endpoint (least differentiated from the summary endpoint)
+2. Endpoint-lookup table normalization (denormalize `endpoint` as text,
+   note the tradeoff in the write-up)
+3. Test breadth (keep dedupe/malformed tests, drop the rest)
+
+Never cut: the write-up, and multi-tenancy filtering on every query.
