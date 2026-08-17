@@ -1,4 +1,4 @@
-import { Kysely, PostgresDialect } from 'kysely';
+import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Pool } from 'pg';
 import type { Database } from './types.js';
 
@@ -32,4 +32,25 @@ export function createDb(databaseUrl: string, logger: PoolLogger): Kysely<Databa
 
 export async function closeDb(db: Kysely<Database>): Promise<void> {
   await db.destroy();
+}
+
+// Every RLS-scoped route (everything except /customers/top, which uses the
+// separate app_admin connection -- ADR 0007) goes through this. `set_config`
+// with `is_local = true` is the parameterized equivalent of `SET LOCAL
+// app.current_customer = $1` -- plain `SET LOCAL app.current_customer =
+// ${customerId}` isn't valid Postgres grammar (SET doesn't take a bind
+// parameter in that position), and building the statement by string-
+// concatenating a URL path parameter would turn the one place this
+// service's entire tenant-isolation story lives into a SQL injection
+// vector (A03). Scoped to one transaction so it can never leak to another
+// request on a pooled connection (ADR 0001).
+export async function withTenant<T>(
+  db: Kysely<Database>,
+  customerId: string,
+  fn: (trx: Kysely<Database>) => Promise<T>
+): Promise<T> {
+  return db.transaction().execute(async (trx) => {
+    await sql`select set_config('app.current_customer', ${customerId}, true)`.execute(trx);
+    return fn(trx);
+  });
 }

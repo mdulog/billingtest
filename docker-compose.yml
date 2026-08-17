@@ -50,6 +50,9 @@ services:
       # Must match the credential api's DATABASE_URL below authenticates
       # with -- local-only dev value, not a real secret.
       APP_USER_PASSWORD: app_user_dev_password
+      # Same pattern for app_admin (ADR 0007) -- the BYPASSRLS role
+      # /customers/top connects as. Must match api's ADMIN_DATABASE_URL.
+      APP_ADMIN_PASSWORD: app_admin_dev_password
     depends_on:
       db:
         condition: service_healthy
@@ -79,6 +82,10 @@ services:
       # must run first). Connecting as the superuser would silently bypass
       # RLS (P9).
       DATABASE_URL: postgres://app_user:app_user_dev_password@db:5432/billingtest
+      # Points at app_admin (BYPASSRLS, SELECT-only) -- used exclusively by
+      # the /customers/top handler. See ADR 0007. Deliberately a distinct
+      # role from DATABASE_URL's app_user, not the bootstrap superuser.
+      ADMIN_DATABASE_URL: postgres://app_admin:app_admin_dev_password@db:5432/billingtest
       PORT: '3000'
       HOST: '0.0.0.0'
     ports:

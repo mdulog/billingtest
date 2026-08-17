@@ -73,8 +73,9 @@ session var set, `current_setting('app.current_customer', true)` is
 `NULL`, and `customer_id = NULL` is never true — `app_user` gets **zero**
 rows, not all tenants' rows, for any query that doesn't set the session
 var. So `/customers/top` cannot be served through `app_user`'s
-RLS-scoped connection at all; it needs a distinct role (e.g. one with
-`BYPASSRLS`) that Phase 3 has not yet added.
+RLS-scoped connection at all; it needs a distinct role with `BYPASSRLS` —
+`app_admin`, added in Phase 3's `migrations/004_admin_role.ts`. See
+ADR 0007 for the role-design tradeoffs.
 
 ## Consequences
 

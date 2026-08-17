@@ -11,6 +11,12 @@ function requireEnv(name: string): string {
 
 export interface Config {
   readonly databaseUrl: string;
+  // Connects as app_admin (BYPASSRLS, SELECT-only) -- used exclusively by
+  // the /customers/top handler. See ADR 0007. Kept as its own required
+  // var, not an optional fallback to databaseUrl, so a missing grant fails
+  // fast at startup rather than as a confusing RLS-empty-result at request
+  // time.
+  readonly adminDatabaseUrl: string;
   readonly port: number;
   readonly host: string;
 }
@@ -23,6 +29,7 @@ export function loadConfig(): Config {
 
   return {
     databaseUrl: requireEnv('DATABASE_URL'),
+    adminDatabaseUrl: requireEnv('ADMIN_DATABASE_URL'),
     port,
     host: process.env.HOST ?? '0.0.0.0',
   };
