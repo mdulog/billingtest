@@ -1,11 +1,17 @@
-// Generates a synthetic usage_events.json fixture matching the shape and the
-// documented messiness in docs/requirements/takehome_requirements.md.
+// DEV TOOL — not part of the service.
+//
+// Generates a SYNTHETIC stand-in for the employer-provided `usage_events.json`,
+// matching the shape and documented messiness in
+// docs/requirements/takehome_requirements.md. This is NOT the provided dataset;
+// it exists so schema and ingestion work isn't blocked. The real file, when
+// available, belongs at the repo root as `usage_events.json`.
+//
 // Seeded so the fixture is reproducible: `node scripts/generate-usage-events.mjs`
 
 import { writeFileSync } from 'node:fs';
 
 const SEED = 20260715;
-const OUTPUT_PATH = new URL('../usage_events.json', import.meta.url);
+const OUTPUT_PATH = new URL('../fixtures/usage_events.sample.json', import.meta.url);
 
 // Window the spec's sample event falls inside; keeps date-range queries meaningful.
 const RANGE_START = Date.UTC(2026, 5, 1);
@@ -215,4 +221,6 @@ for (let i = events.length - 1; i > 0; i -= 1) {
 
 writeFileSync(OUTPUT_PATH, `${JSON.stringify(events, null, 2)}\n`);
 
-console.log(`Wrote ${events.length} events (${defects.length} deliberately defective) to usage_events.json`);
+console.log(
+  `Wrote ${events.length} events (${defects.length} deliberately defective) to fixtures/usage_events.sample.json`,
+);
