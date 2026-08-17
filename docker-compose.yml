@@ -21,7 +21,11 @@ services:
       POSTGRES_PASSWORD: postgres_dev_only
       POSTGRES_DB: billingtest
     ports:
-      - '5432:5432'
+      # Loopback-only. api reaches db over the compose network via service
+      # DNS (db:5432) regardless of host publishing -- this is purely for
+      # local `psql` debugging from the host, so it must not bind wider
+      # than 127.0.0.1. A bare '5432:5432' binds all interfaces.
+      - '127.0.0.1:5432:5432'
     volumes:
       # Named volume, not a bind mount -- required on SELinux Enforcing
       # (bind mounts need :z/:Z relabeling) and avoids rootless Podman's
