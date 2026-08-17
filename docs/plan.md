@@ -1,6 +1,8 @@
 # Scope: Multi-Tenant Usage & Billing Schema (2–4 hours, target ~3h)
 
 Spec: `docs/requirements/takehome_requirements.md`
+Assumptions: `docs/assumptions.md` — every gap the spec left open, with
+provenance (spec-derived / inferred / invented) and the cost of being wrong.
 
 Target commit cadence: one commit per phase minimum, 2–3 within Phases 1–3.
 This file is itself commit #1 — the point is to think through the scope and
