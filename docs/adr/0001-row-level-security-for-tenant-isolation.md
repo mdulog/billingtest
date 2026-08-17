@@ -56,24 +56,25 @@ This requires the API to connect as a **non-superuser role** — see ADR
 which would make this policy silently decorative.
 
 **Applies to every tenant-scoped table, not just `usage_events`.**
-`customers` gets the identical `ENABLE`/`FORCE`/policy treatment. Without
-a policy on `customers`, `app_user` could `SELECT * FROM customers` with
-no `WHERE` and enumerate every tenant ID and plan regardless of session
+`customers` and `customer_plans` (added in migration 002, ADR 0002) get the
+identical `ENABLE`/`FORCE`/policy treatment. Without a policy on
+`customers`, `app_user` could `SELECT * FROM customers` with no
+`WHERE` and enumerate every tenant ID and plan regardless of session
 context — the same class of leak this ADR exists to prevent, just on a
 different table. Confirmed by test: `src/db/rls.test.ts` asserts this for
-both tables, including the negative case (no session var set → zero rows,
-not another tenant's).
+all three tables, including the negative case (no session var set → zero
+rows, not another tenant's).
 
 `/customers/top` is deliberately cross-tenant (an admin/ops view) and uses
 a separate, non-RLS-scoped connection path rather than working around the
 policy per-request. Note this is a hard requirement once RLS is `FORCE`d
-on `customers`/`usage_events` for `app_user`: with no session var set,
-`current_setting('app.current_customer', true)` is `NULL`, and
-`customer_id = NULL` is never true — `app_user` gets **zero** rows, not
-all tenants' rows, for any query that doesn't set the session var. So
-`/customers/top` cannot be served through `app_user`'s RLS-scoped
-connection at all; it needs a distinct role (e.g. one with `BYPASSRLS`)
-that Phase 3 has not yet added.
+on `customers`/`usage_events`/`customer_plans` for `app_user`: with no
+session var set, `current_setting('app.current_customer', true)` is
+`NULL`, and `customer_id = NULL` is never true — `app_user` gets **zero**
+rows, not all tenants' rows, for any query that doesn't set the session
+var. So `/customers/top` cannot be served through `app_user`'s
+RLS-scoped connection at all; it needs a distinct role (e.g. one with
+`BYPASSRLS`) that Phase 3 has not yet added.
 
 ## Consequences
 

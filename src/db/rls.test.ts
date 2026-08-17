@@ -130,3 +130,39 @@ describe('tenant isolation on customers', () => {
     expect(rows[0]?.id).toBe('cust_a');
   });
 });
+
+describe('customer_plans exclusion constraint', () => {
+  test('rejects overlapping valid_period rows for the same customer', async () => {
+    await sql`delete from customer_plans`.execute(superuserDb);
+
+    await sql`
+      insert into customer_plans (customer_id, plan, valid_period)
+      values ('cust_a', 'pro', tstzrange('2026-01-01', '2026-06-01', '[)'))
+    `.execute(superuserDb);
+
+    await expect(
+      sql`
+        insert into customer_plans (customer_id, plan, valid_period)
+        values ('cust_a', 'enterprise', tstzrange('2026-03-01', '2026-09-01', '[)'))
+      `.execute(superuserDb)
+    ).rejects.toThrow(/exclusion/i);
+  });
+
+  test('app_user with tenant context set cannot see another tenant\'s plan history', async () => {
+    await sql`delete from customer_plans`.execute(superuserDb);
+    await sql`
+      insert into customer_plans (customer_id, plan, valid_period)
+      values
+        ('cust_a', 'pro', tstzrange('2026-01-01', '2026-06-01', '[)')),
+        ('cust_b', 'growth', tstzrange('2026-01-01', null, '[)'))
+    `.execute(superuserDb);
+
+    const rows = await appDb.transaction().execute(async (trx) => {
+      await sql`select set_config('app.current_customer', ${'cust_a'}, true)`.execute(trx);
+      return trx.selectFrom('customer_plans').selectAll().execute();
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.customer_id).toBe('cust_a');
+  });
+});

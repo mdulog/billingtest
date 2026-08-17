@@ -5,6 +5,7 @@ import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 export interface Database {
   customers: CustomersTable;
   usage_events: UsageEventsTable;
+  customer_plans: CustomerPlansTable;
 }
 
 export interface CustomersTable {
@@ -32,4 +33,16 @@ export interface UsageEventsTable {
   // ISO string is accepted on insert/update.
   occurred_at: ColumnType<Date, Date | string, Date | string>;
   metadata: JSONColumnType<Record<string, unknown>>;
+}
+
+export interface CustomerPlansTable {
+  id: Generated<string>;
+  customer_id: string;
+  plan: string;
+  // tstzrange has no native pg-node type mapping without a custom type
+  // parser -- represented here as its Postgres range-literal text
+  // (e.g. '["2026-01-01 00:00:00+00","2026-06-01 00:00:00+00")'). Queries
+  // that construct one should use `tstzrange(...)` in SQL rather than
+  // building the literal by hand in application code.
+  valid_period: string;
 }
