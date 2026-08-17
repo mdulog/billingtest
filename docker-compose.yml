@@ -1,9 +1,8 @@
 # `docker compose up` (or `podman compose up` -- see docs/plan.md for the
 # Podman/SELinux specifics verified on this machine) is the only setup step.
 #
-# `migrate` and `ingest` are one-shot services added in Phase 1 and Phase 2
-# respectively, once the scripts they run actually exist. Wiring them in
-# now, ahead of the code, would just be a broken compose target.
+# `ingest` is a one-shot service to be added in Phase 2, once the ingestion
+# script it runs exists.
 
 services:
   db:
@@ -37,15 +36,32 @@ services:
       timeout: 3s
       retries: 15
 
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      # Bootstrap superuser, not app_user -- migrations create app_user
+      # (via CREATE ROLE) and RLS policies, both of which require elevated
+      # privileges the runtime API role deliberately doesn't have. See
+      # ADR 0006.
+      MIGRATE_DATABASE_URL: postgres://postgres:postgres_dev_only@db:5432/billingtest
+      # The password migrations assign to the app_user role they create.
+      # Must match the credential api's DATABASE_URL below authenticates
+      # with -- local-only dev value, not a real secret.
+      APP_USER_PASSWORD: app_user_dev_password
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: .
       target: runtime
     environment:
-      # Points at app_user, not the postgres superuser -- created by
-      # migrations/001_initial_schema.ts once Phase 1 lands. Connecting as
-      # a superuser would silently bypass RLS (P9); this is deliberate even
-      # though app_user doesn't exist yet.
+      # Points at app_user, created by the migrate service above (which
+      # must run first). Connecting as the superuser would silently bypass
+      # RLS (P9).
       DATABASE_URL: postgres://app_user:app_user_dev_password@db:5432/billingtest
       PORT: '3000'
       HOST: '0.0.0.0'
@@ -54,6 +70,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # ⚠️ Verified on this machine: podman-compose 1.6.0 does NOT gate
+      # startup on this condition -- `api` and `migrate` were observed
+      # starting within ~46ms of each other against a cold volume, well
+      # before `migrate` (which takes several seconds) had finished. This
+      # stays here because it's correct per the Compose spec and does work
+      # under real `docker compose`, and it documents intent either way.
+      # Currently harmless because src/server.ts never queries the database
+      # at startup (connections are lazy) -- but Phase 3's handlers will
+      # query eagerly per-request, so a request arriving in that ~few-second
+      # window would hit "password authentication failed for user app_user"
+      # (the role migrate hasn't created yet), not a clean 503. Phase 3
+      # needs its own mitigation (a startup readiness gate or a
+      # retry-on-connect in src/db/connection.ts) rather than trusting this
+      # condition under Podman.
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
