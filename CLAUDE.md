@@ -6,13 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A take-home exercise (`docs/spec/takehome_requirements.md` — **read-only, `chmod 444`, never edit it**): a multi-tenant usage/billing service in Node.js/TypeScript backed by Postgres, ingesting `usage_events.json` and exposing HTTP endpoints for billing-relevant queries.
 
-**Read `docs/plan.md` and `docs/assumptions.md` before making any design decision.** This is not optional context — it's the project's actual source of truth:
+**Read `docs/plan.md` and `docs/assumptions.md` before making any design decision.** This is not optional context — it's the project's actual source of truth, alongside `docs/adr/`, `docs/architecture.md`, and `docs/writeup.md` below:
 
 - `docs/plan.md` is the phase-by-phase build plan with decisions already made (multi-tenancy mechanism, dedupe strategy, framework choices) and their rationale. Check it before re-deciding something it already settled.
 - `docs/assumptions.md` is the assumptions register: every gap the spec left open, tagged by provenance (📄 spec-derived / 🗣️ owner-supplied / 🔍 inferred / ⚠️ invented) with the cost of being wrong. Assumptions tagged ⚠️ invented are the ones most likely to need revisiting; owner-supplied ones (🗣️) are settled and shouldn't be re-litigated without asking.
 - `docs/adr/` holds MADR-format Architecture Decision Records for the settled decisions (RLS for tenant isolation, plan history as a range table, Fastify/Kysely, containerization, the derived dedupe key, the non-superuser role, the admin cross-tenant role) — read the relevant ADR before touching code that implements one of these, rather than re-deriving the reasoning from the code alone.
+- `docs/architecture.md` has the connection/role-topology diagram (Mermaid) — which Postgres role each code path connects as, and which tables/routes it can reach. Update it if a route's connection or a role's grants change.
+- `docs/writeup.md` is the submitted answer to the spec's four write-up questions (schema design, multi-tenancy, operating it, what's next) — already committed; keep it in sync if a cited fact (migration ownership, what's actually instrumented) changes.
 
-Both documents are living records — when a design decision changes, update the relevant entry rather than letting the docs drift from the code.
+These are living records — when a design decision changes, update the relevant entry rather than letting the docs drift from the code.
 
 ## Current state
 
