@@ -10,7 +10,7 @@ A take-home exercise (`docs/spec/takehome_requirements.md` — **read-only, `chm
 
 - `docs/plan.md` is the phase-by-phase build plan with decisions already made (multi-tenancy mechanism, dedupe strategy, framework choices) and their rationale. Check it before re-deciding something it already settled.
 - `docs/assumptions.md` is the assumptions register: every gap the spec left open, tagged by provenance (📄 spec-derived / 🗣️ owner-supplied / 🔍 inferred / ⚠️ invented) with the cost of being wrong. Assumptions tagged ⚠️ invented are the ones most likely to need revisiting; owner-supplied ones (🗣️) are settled and shouldn't be re-litigated without asking.
-- `docs/adr/` holds MADR-format Architecture Decision Records for the settled decisions (RLS for tenant isolation, plan history as a range table, Fastify/Kysely, containerization, the derived dedupe key, the non-superuser role) — read the relevant ADR before touching code that implements one of these, rather than re-deriving the reasoning from the code alone.
+- `docs/adr/` holds MADR-format Architecture Decision Records for the settled decisions (RLS for tenant isolation, plan history as a range table, Fastify/Kysely, containerization, the derived dedupe key, the non-superuser role, the admin cross-tenant role) — read the relevant ADR before touching code that implements one of these, rather than re-deriving the reasoning from the code alone.
 
 Both documents are living records — when a design decision changes, update the relevant entry rather than letting the docs drift from the code.
 
@@ -31,10 +31,16 @@ npm start             # node dist/server.js (run build first)
 npm test              # vitest run
 npm run test:watch    # vitest, watch mode
 npm run typecheck     # tsc --noEmit
+npm run migrate        # tsx src/db/migrate.ts — runs as MIGRATE_DATABASE_URL (bootstrap superuser, ADR 0006), never DATABASE_URL
+npm run ingest         # tsx src/ingest/ingest.ts — runs as INGEST_DATABASE_URL; reads ./usage_events.json if present, else fixtures/usage_events.sample.json (override via USAGE_EVENTS_PATH)
 ```
 
 Single test file: `npx vitest run src/path/to/file.test.ts`
 Single test by name: `npx vitest run -t "test name"`
+
+### Environment (non-container / local dev)
+
+`npm run dev`/`migrate`/`ingest` don't auto-load `.env` (no dotenv wired in) — export vars in your shell, or use `podman compose` where they're set for you. See `.env.example` for the full list and rationale; the short version: `DATABASE_URL` (app_user), `MIGRATE_DATABASE_URL`/`INGEST_DATABASE_URL` (bootstrap superuser — migrations need `CREATE ROLE`/`CREATE POLICY`, ingestion writes cross-tenant in one run), `ADMIN_DATABASE_URL` (app_admin, `/customers/top` only), `PORT`/`HOST`.
 
 ### Containers
 
