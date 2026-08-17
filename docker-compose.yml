@@ -1,0 +1,55 @@
+# `docker compose up` (or `podman compose up` -- see docs/plan.md for the
+# Podman/SELinux specifics verified on this machine) is the only setup step.
+#
+# `migrate` and `ingest` are one-shot services added in Phase 1 and Phase 2
+# respectively, once the scripts they run actually exist. Wiring them in
+# now, ahead of the code, would just be a broken compose target.
+
+services:
+  db:
+    # Fully qualified, not the short name "postgres:17-alpine" -- this
+    # host has short-name-mode=enforcing with multiple candidate registries
+    # (see /etc/containers/registries.conf), so an unqualified name blocks
+    # on an interactive prompt Podman can't issue without a TTY. Correct
+    # under Docker too; it just isn't ambiguous there.
+    image: docker.io/library/postgres:17-alpine
+    environment:
+      # Superuser bootstrap credentials, used only by the (future) `migrate`
+      # service to create the app's non-superuser role -- see P9 in
+      # docs/assumptions.md. Local-only dev values; never used at runtime.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev_only
+      POSTGRES_DB: billingtest
+    ports:
+      - '5432:5432'
+    volumes:
+      # Named volume, not a bind mount -- required on SELinux Enforcing
+      # (bind mounts need :z/:Z relabeling) and avoids rootless Podman's
+      # UID-mapped ownership issues on bind mounts. See docs/plan.md.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      # Points at app_user, not the postgres superuser -- created by
+      # migrations/001_initial_schema.ts once Phase 1 lands. Connecting as
+      # a superuser would silently bypass RLS (P9); this is deliberate even
+      # though app_user doesn't exist yet.
+      DATABASE_URL: postgres://app_user:app_user_dev_password@db:5432/billingtest
+      PORT: '3000'
+      HOST: '0.0.0.0'
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
