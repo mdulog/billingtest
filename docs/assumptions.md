@@ -90,7 +90,8 @@ because everything in §2b depends on them.
 | A3 | All timestamps are handled in UTC; no per-customer billing timezone. | ⚠️ Invented | A customer billed on local-midnight boundaries gets wrong daily/monthly totals. Realistic requirement, deliberately out of scope. |
 | A4 | Result sets are small enough not to need pagination. | 🔍 Inferred (take-home scale) | Per-endpoint breakdown for a heavy customer over a year would need it. |
 | A5 | "Usage summary" means event count, total `duration_ms`, and a status breakdown. | 📄 Spec ("event counts, total `duration_ms`, etc.") — the "etc." is mine to define | — |
-| A6 | Operational health is measured by reject rate by reason, ingest duration, events ingested per run, and dedupe hit rate. | 🔍 Inferred (write-up question 3) | — |
+| A6 | Operational health is measured by reject rate by reason, ingest duration, events ingested per run, dedupe hit rate, and endpoint p95 latency. | 🔍 Inferred (write-up question 3) | — |
+| A7 | Paging is reserved for failures that are **silently wrong and cost money or leak data** — stale ingest, a reject-rate shift, cross-tenant leakage, availability. Individual malformed records are explicitly *not* page-worthy; the quarantine table absorbs them by design. | 🔍 Inferred (write-up question 3, "what would page someone at 2am") | Paging on every reject trains responders to ignore the alarm, which is worse than not having it. Full matrix in `plan.md` → Operational posture. |
 
 ## 6. Stack & process
 
@@ -99,8 +100,11 @@ because everything in §2b depends on them.
 | P1 | Node 24.x is the current Active LTS. Local environment is v22.23.1 (maintenance line). | ⚠️ Invented — **Context7 returned no Node release-schedule doc**; not verified against nodejs.org. | Low impact; no design decision depends on it. |
 | P2 | Postgres 17/18. RLS and declarative range partitioning are both assumed available. | 🔍 Inferred (both long-standing features) | — |
 | P3 | Kysely over an ORM — typed SQL that still shows schema reasoning, which is what's being graded. | 🔍 Inferred (spec: "use what you'd reach for") | — |
+| P7 | Fastify over Express, for per-route JSON Schema validation (`params` / `querystring`) plus `setErrorHandler` on `error.validation`. Verified against Fastify docs via Context7. | 🗣️ Owner-supplied | Express would work; boundary validation becomes hand-rolled or a `zod`/`celebrate` dependency. |
 | P4 | Tests run against a real Postgres, not a mocked DB. | 📄 Spec (schema correctness is the subject) | — |
-| P5 | Budget ~3h of the stated 2–4h, with the cut-order in `plan.md` if it slips. | 📄 Spec | — |
+| P5 | Budget ~4h of the stated 2–4h, with the cut-order in `plan.md` if it slips. | 📄 Spec | — |
+| P8 | **Service and database both run in containers**; `docker compose up` is the only setup step on a reviewer's machine. Config via environment variables, fail fast if absent. | 🗣️ Owner-supplied | — |
+| P9 | The API connects as a **dedicated non-superuser role**, created in migrations. | 🔍 Inferred (forced by P8 + T4) | Superusers bypass RLS entirely, so connecting with the Postgres image's default credentials would make every tenant-isolation guarantee inert while still appearing to work. |
 | P6 | Git history should read as incremental decisions, not one upload. | 📄 Spec ("commit as if you were working in a real team") | — |
 
 ---
