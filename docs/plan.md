@@ -1,4 +1,4 @@
-# Scope: Multi-Tenant Usage & Billing Schema (2–4 hours, target ~3h)
+# Scope: Multi-Tenant Usage & Billing Schema (2–4 hours, target ~3.5h)
 
 Spec: `docs/requirements/takehome_requirements.md`
 Assumptions: `docs/assumptions.md` — every gap the spec left open, with
@@ -58,6 +58,32 @@ the write-up either way.
   `occurred_at`, `endpoint`) — decide now while the query shapes are fresh.
 - Commit: `feat: initial schema and migrations`
 
+**Second migration, same phase — plan history.** Owner confirmed upgrades
+take effect immediately while downgrades/cancellations wait for period end
+(`docs/assumptions.md` B3), so `customers.plan` alone can't answer "which
+plan was in effect when this event occurred." Keep this a genuine second
+migration rather than folding it into the first — the spec asks how you
+evolve a schema, and this is a real instance of that, not a contrived one.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE customer_plans (
+  id           bigserial PRIMARY KEY,
+  customer_id  text      NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  plan         text      NOT NULL,
+  valid_period tstzrange NOT NULL,
+  EXCLUDE USING gist (customer_id WITH =, valid_period WITH &&)
+);
+```
+
+The exclusion constraint makes overlapping plan periods for one customer
+impossible to store — not an app-level promise, a database-enforced one.
+`customers.plan` stays as a denormalized cache of the current plan
+(maintained in the same transaction), which is a direct, nameable answer to
+requirement #1's "FK vs. denormalized for read performance."
+- Commit: `feat: plan history schema`
+
 ## Phase 2 — Ingestion (40–50 min)
 - Read JSON, validate/normalize, upsert customers, insert events.
 - **Owner decision: the dedupe key.** The source has no `event_id`, so the key
@@ -75,10 +101,27 @@ the write-up either way.
 - Wrap the batch insert in a transaction.
 - Commit: `feat: usage_events ingestion`
 
+**Plan history derivation, same phase.** Pure function over one customer's
+events ordered by `occurred_at`: walk in time order, and on a plan change
+apply the monotonic-tier guard from `assumptions.md` S3 — an **upgrade**
+(higher tier) closes the current interval and opens a new one; a
+**downgrade** is rejected as dirty data, since B2 forbids mid-period
+downgrades. Keep it pure (no DB) so it unit-tests directly; the derived
+intervals then get inserted into `customer_plans` inside the same ingest
+transaction. This is where the exclusion constraint gets exercised for
+real, not just at the DDL level.
+- Commit: `feat: derive plan history from usage events`
+
 ## Phase 3 — HTTP API (45–60 min)
 Three endpoints, all scoped by `customer_id` and date range:
-- `GET /customers/:id/usage?from=&to=` — summary (event counts, total duration_ms)
-- `GET /customers/top?from=&to=&limit=` — ranked usage across customers
+- `GET /customers/:id/usage?from=&to=` — summary (event counts, total
+  duration_ms), broken down **per plan** via a `LEFT JOIN customer_plans ON
+  occurred_at <@ valid_period` — `LEFT`, not inner, so an event landing in a
+  coverage gap still counts (surfaces under a `null` plan bucket) instead of
+  silently vanishing from a billing report
+- `GET /customers/top?from=&to=&limit=` — ranked usage across customers,
+  labeled with `customers.plan` (current standing, not historical
+  attribution — it's a cross-tenant admin view, not per-period billing)
 - `GET /customers/:id/endpoints?from=&to=` — per-endpoint breakdown
 - Validate `from`/`to` and `customer_id` at the boundary; return 400 on bad
   input, not a raw DB error.
@@ -87,6 +130,15 @@ Three endpoints, all scoped by `customer_id` and date range:
 ## Phase 4 — Tests (30–40 min)
 - Ingestion: dedupe logic and malformed-record handling — these are the
   parts with actual decisions in them, test those first if time is short.
+- Plan history derivation (unit, no DB): single-plan-throughout → one
+  unbounded interval; mid-period upgrade → two abutting intervals;
+  mid-period downgrade → rejected, one interval; casing/whitespace variants
+  → normalized before comparison, one interval.
+- The worked example, as an integration test: 100 events under `pro`, an
+  upgrade, 200 under `enterprise`, all inside one month. A month-wide
+  summary must return two rows (100/`pro`, 200/`enterprise`) — not 300 under
+  `enterprise`. This is the test that proves B3 was implemented, not just
+  documented.
 - At least one endpoint against a real DB (or test container), asserting on
   response shape and values, not just status 200.
 - Commit: `test: ingestion and endpoint coverage`
@@ -100,9 +152,13 @@ Keep "what I'd do next" honest and short (2–3 items).
 ---
 
 ## If time runs short, cut in this order
-1. Top-customers endpoint (least differentiated from the summary endpoint)
-2. Endpoint-lookup table normalization (denormalize `endpoint` as text,
+1. Plan history (Phase 1's second migration + Phase 2's derivation step) —
+   collapse to `customers.plan` only, and write B3/S2/S3 up as documented-but-
+   deferred rather than implemented. The register already supports that
+   framing; it's exactly what an "invented ⚠️" tag is for.
+2. Top-customers endpoint (least differentiated from the summary endpoint)
+3. Endpoint-lookup table normalization (denormalize `endpoint` as text,
    note the tradeoff in the write-up)
-3. Test breadth (keep dedupe/malformed tests, drop the rest)
+4. Test breadth (keep dedupe/malformed tests, drop the rest)
 
 Never cut: the write-up, and multi-tenancy filtering on every query.

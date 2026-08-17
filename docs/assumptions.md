@@ -36,18 +36,19 @@ because everything in §2b depends on them.
 |---|---|---|---|
 | B1 | `plan` is a **subscription tier** (`free`, `growth`, `pro`, `enterprise`). A customer holds at most one at a time. | 🗣️ Owner-supplied | Add-ons or stacked entitlements would make plan a many-to-many, not a column. |
 | B2 | **Cancellation means non-renewal at the end of the current billing period** — never mid-period termination. No proration, no partial-period tier on cancel. | 🗣️ Owner-supplied | Mid-period cancellation would require proration math and a partial-period tier at event granularity. |
-| B3 | ⚠️ **Open — B2 does not cover upgrades.** The standard SaaS pattern is asymmetric: upgrades take effect *immediately* (prorated), downgrades and cancellations at *period end*. B2 settles the second half only. | 🔍 Inferred (industry norm) | If upgrades are also period-end-only, plan is genuinely constant within a period and S2 stops being a limitation at all — the simplest possible outcome. Worth asking. |
-| B4 | Because of B2, a customer's plan is constant within a billing period **for cancellations and downgrades**. Because of B3, that is *not* guaranteed for upgrades. | 🔍 Inferred (follows B2+B3) | — |
+| B3 | **Upgrades take effect immediately** (prorated); downgrades and cancellations wait for period end. Plan changes are therefore asymmetric. | 🗣️ Owner-supplied | If upgrades were also period-end-only, plan would be constant within a period and the whole `customer_plans` table would be unnecessary. |
+| B4 | A customer's plan is **not** constant within a billing period. Cancellations and downgrades align to period boundaries (B2); upgrades do not (B3). | 🔍 Inferred (follows B2+B3) | — |
 | B5 | Plan is currently a **grouping dimension only** — no rates, quotas, or currency math are in scope. The endpoints report usage, not money. | 🔍 Inferred (spec asks for counts and durations, never amounts) | The moment per-tier rates enter, plan-at-event-time (S2) stops being a limitation and becomes a hard correctness requirement. |
 | B6 | A lapsed/cancelled state exists — a customer with no active subscription. Whether usage events can still arrive during a grace period is **open**. | 🔍 Inferred (follows B2) | Events arriving after lapse are either a grace period (expected) or an access-revocation failure (an incident). Changes whether that's a metric or an alarm. |
+| B7 | Plan tiers form a **total order**: `free < growth < pro < enterprise`. | ⚠️ Invented | Required by the S3 disambiguation rule below. If tiers aren't linearly ordered (e.g. parallel add-on plans, regional tiers), "upgrade vs. downgrade" isn't well-defined and transition detection needs a different guard. |
 
 ## 2b. Schema design
 
 | # | Assumption | Basis | If wrong |
 |---|---|---|---|
 | S1 | `plan` is an attribute of the **customer**, not of the event. | 📄 Spec ("repeated on every event for a customer, rather than stored once") | — |
-| S2 | Storing only the customer's *current* plan is acceptable for now. | 🔍 Inferred (3h budget) | **Known limitation, narrowed by B2/B4.** Safe for queries scoped inside a single billing period; unsafe across periods, and unsafe within a period if B3 resolves toward immediate upgrades. Correct fix is an SCD-2 `customer_plans(customer_id, plan, effective_from, effective_to)` — and per B4 those boundaries align to billing periods rather than arbitrary instants, which keeps the table small and the join cheap. Top "what I'd do next". |
-| S3 | Where a customer shows conflicting plan values, they represent one plan recorded dirtily — not a plan change. | ⚠️ Invented — **weakened by B3** | Under B3, a genuine mid-period upgrade produces exactly this signature. Collapsing it silently loses billable history and turns S2 from a limitation into a correctness bug. Distinguishing the two needs the events ordered by time: dirty data interleaves, a real change has a clean before/after split at one instant. |
+| S2 | **Resolved — implemented, not deferred.** `customers.plan` alone is insufficient per B3/B4; plan-at-event-time is tracked in a separate `customer_plans(customer_id, plan, valid_period)` table with an `EXCLUDE USING gist` constraint preventing overlaps. `customers.plan` is kept as a denormalized cache of the current plan for cheap listing reads. | 🗣️ Owner-supplied (via B3) | — |
+| S3 | **Resolved.** A mid-period plan change is a real upgrade if it moves *up* the B7 tier ladder; it's dirty data if it moves *down*, since B2 forbids mid-period downgrades. Events are walked in `occurred_at` order per customer; upgrades close the current interval and open a new one, downgrades are rejected and the running plan is kept. | 🔍 Inferred (derived from B2+B3+B7) | Depends entirely on B7 (total tier order). If two plans aren't comparable, this guard can't classify the transition and needs replacing — e.g. an explicit subscription-event feed instead of inferring from usage data. |
 | S4 | A user (`user_email`) belongs to exactly one customer; uniqueness is `(customer_id, email)`, not global. | 🔍 Inferred (multi-tenant norm) | Shared users across tenants would need a join table and would complicate tenant isolation. |
 | S5 | `duration_ms` and `status` are the only hot fields worth promoting to typed columns; the rest stay in `jsonb`. | 🔍 Inferred (from the three required queries) | If billing later keys on `rows` or `attempt`, those need promoting too — a migration, which is fine and demonstrates schema evolution. |
 | S6 | Full `metadata` is retained losslessly even after promotion. | ⚠️ Invented | Costs storage. Justified because discarding unknown fields at ingest is irreversible. |
@@ -109,11 +110,10 @@ because everything in §2b depends on them.
 The spec invites clarifying questions. These are the ones where guessing costs
 the most, roughly in priority order:
 
-1. **Do upgrades take effect immediately, or at period end like cancellations?** (B3) — cancellation timing is settled; upgrade timing is the half that still decides whether plan-at-event-time is required.
-2. **Is a redelivered event with different `metadata` the same billable event?** (I2) — changes billed counts directly.
-3. **Do conflicting `plan` values represent a real plan change or dirty data?** (S3, S2) — dependent on B3.
-4. **Can usage events legitimately arrive after a subscription lapses (grace period), or is that an access-control failure?** (B6) — decides metric vs. alarm.
-5. **Who is the audience for `/customers/top`?** (T5) — internal ops, or customer-facing? Determines whether cross-tenant access is a feature or a leak.
-6. **Is billing computed on UTC boundaries or per-customer local time?** (A3)
-7. **Should events with no `customer_id` be recoverable, or written off?** (I6)
-8. **Is `event_type` a closed set product controls, or open-ended?** (I9)
+1. **Is a redelivered event with different `metadata` the same billable event?** (I2) — changes billed counts directly.
+2. **Can usage events legitimately arrive after a subscription lapses (grace period), or is that an access-control failure?** (B6) — decides metric vs. alarm.
+3. **Are plan tiers totally ordered** (`free < growth < pro < enterprise`), or can a customer hold parallel/incomparable plans? (B7) — the upgrade/downgrade disambiguation in S3 depends on it.
+4. **Who is the audience for `/customers/top`?** (T5) — internal ops, or customer-facing? Determines whether cross-tenant access is a feature or a leak.
+5. **Is billing computed on UTC boundaries or per-customer local time?** (A3)
+6. **Should events with no `customer_id` be recoverable, or written off?** (I6)
+7. **Is `event_type` a closed set product controls, or open-ended?** (I9)
