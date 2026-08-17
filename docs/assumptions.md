@@ -7,7 +7,7 @@ so the write-up argues from a record rather than reconstructing intent.
 
 | Marker | Meaning |
 |---|---|
-| 📄 **Spec** | Stated or directly implied by `docs/requirements/takehome_requirements.md` |
+| 📄 **Spec** | Stated or directly implied by `docs/spec/takehome_requirements.md` |
 | 🗣️ **Owner** | Domain fact supplied by the project owner, absent from the written spec |
 | 🔍 **Inferred** | Not stated, but the most defensible reading of the spec or the data |
 | ⚠️ **Invented** | Chosen with no evidence either way. Highest risk — verify these first if the real dataset or a clarifying answer arrives. |
@@ -30,7 +30,8 @@ so the write-up argues from a record rather than reconstructing intent.
 ## 2. Billing model
 
 Domain semantics the spec never states. Supplied by the project owner; recorded
-because everything in §2b depends on them.
+because everything in §2b depends on them. B3/B4/B7 graduated into
+[ADR 0002](adr/0002-plan-history-as-a-range-table.md).
 
 | # | Assumption | Basis | If wrong |
 |---|---|---|---|
@@ -43,6 +44,8 @@ because everything in §2b depends on them.
 | B7 | Plan tiers form a **total order**: `free < growth < pro < enterprise`. | ⚠️ Invented | Required by the S3 disambiguation rule below. If tiers aren't linearly ordered (e.g. parallel add-on plans, regional tiers), "upgrade vs. downgrade" isn't well-defined and transition detection needs a different guard. |
 
 ## 2b. Schema design
+
+S2/S3 graduated into [ADR 0002](adr/0002-plan-history-as-a-range-table.md).
 
 | # | Assumption | Basis | If wrong |
 |---|---|---|---|
@@ -58,6 +61,9 @@ because everything in §2b depends on them.
 
 ## 3. Multi-tenancy
 
+T1–T4 graduated into [ADR 0001](adr/0001-row-level-security-for-tenant-isolation.md);
+T4/P9 into [ADR 0006](adr/0006-non-superuser-role-for-rls-enforcement.md).
+
 | # | Assumption | Basis | If wrong |
 |---|---|---|---|
 | T1 | "Isolate one customer's data from another's **at the database level**" means DB-enforced, not application `WHERE` discipline. | 📄 Spec (emphasis theirs) | If app-level filtering was the intent, RLS is over-engineering for the time budget. |
@@ -68,6 +74,8 @@ because everything in §2b depends on them.
 | T6 | **No authentication is in scope.** Tenant identity comes from the URL path parameter. | ⚠️ Invented (spec never mentions auth) | 🚨 In production this is a trivial IDOR — anyone can read any tenant by changing the URL. Tenant identity must come from an authenticated token, not user input. Called out explicitly in the write-up rather than left implied. |
 
 ## 4. Ingestion
+
+I1/I2/I3 graduated into [ADR 0005](adr/0005-derived-dedupe-key-no-source-event-id.md).
 
 | # | Assumption | Basis | If wrong |
 |---|---|---|---|
@@ -94,6 +102,9 @@ because everything in §2b depends on them.
 | A7 | Paging is reserved for failures that are **silently wrong and cost money or leak data** — stale ingest, a reject-rate shift, cross-tenant leakage, availability. Individual malformed records are explicitly *not* page-worthy; the quarantine table absorbs them by design. | 🔍 Inferred (write-up question 3, "what would page someone at 2am") | Paging on every reject trains responders to ignore the alarm, which is worse than not having it. Full matrix in `plan.md` → Operational posture. |
 
 ## 6. Stack & process
+
+P3/P7 graduated into [ADR 0003](adr/0003-fastify-and-kysely.md);
+P8 into [ADR 0004](adr/0004-containerize-with-podman-compatible-images.md).
 
 | # | Assumption | Basis | If wrong |
 |---|---|---|---|

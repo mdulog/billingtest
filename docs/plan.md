@@ -1,8 +1,11 @@
 # Scope: Multi-Tenant Usage & Billing Schema (2–4 hours, target ~4h)
 
-Spec: `docs/requirements/takehome_requirements.md`
+Spec: `docs/spec/takehome_requirements.md`
 Assumptions: `docs/assumptions.md` — every gap the spec left open, with
 provenance (spec-derived / inferred / invented) and the cost of being wrong.
+Decisions: `docs/adr/` — MADR-format records for the settled architectural
+decisions (RLS, plan history, stack, containerization, dedupe, role
+separation); assumptions.md entries that graduated into one link to it.
 
 Target commit cadence: one commit per phase minimum, 2–3 within Phases 1–3.
 This file is itself commit #1 — the point is to think through the scope and
