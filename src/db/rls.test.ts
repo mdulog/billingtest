@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { beforeAll, afterAll, describe, expect, test } from 'vitest';
 import type { Database } from './types.js';
 import { deriveDedupeKey } from '../ingest/dedupeKey.js';
+import { withTenant } from './connection.js';
 
 // Two connections, deliberately: app_user is the role the API actually runs
 // as (subject to RLS), superuser is the migration/bootstrap role (bypasses
@@ -129,6 +130,41 @@ describe('tenant isolation on usage_events', () => {
 
     const customerIds = rows.map((row) => row.customer_id).sort();
     expect(customerIds).toEqual(['cust_a', 'cust_b']);
+  });
+
+  // The two tests above prove RLS filters correctly, but each ran in its
+  // own transaction and pg's pool (default size 10) doesn't guarantee they
+  // shared a physical connection -- so neither one actually distinguishes
+  // "SET LOCAL is scoped to its transaction" from "the fail-closed test
+  // just happened to land on a fresh connection." ADR 0001's whole claim is
+  // about connection reuse, so the proof needs a pool that forces it.
+  test('SET LOCAL app.current_customer does not leak to the next transaction on a reused pooled connection', async () => {
+    const singleConnDb = new Kysely<Database>({
+      dialect: new PostgresDialect({
+        pool: new Pool({ connectionString: requireEnv('DATABASE_URL'), max: 1 }),
+      }),
+    });
+
+    try {
+      // Through the real production path (withTenant), not a hand-rolled
+      // set_config -- this has to prove the code that ships, not a stand-in.
+      const scopedRows = await withTenant(singleConnDb, 'cust_a', (trx) =>
+        trx.selectFrom('usage_events').selectAll().execute()
+      );
+      expect(scopedRows).toHaveLength(1);
+      expect(scopedRows[0]?.customer_id).toBe('cust_a');
+
+      // Same pool, max: 1 -- this transaction can only run on the physical
+      // connection the tenant-scoped one above just released. If SET LOCAL
+      // had leaked (i.e. a plain SET had been used instead), this would
+      // still see cust_a's row.
+      const unscopedRows = await singleConnDb
+        .transaction()
+        .execute((trx) => trx.selectFrom('usage_events').selectAll().execute());
+      expect(unscopedRows).toHaveLength(0);
+    } finally {
+      await singleConnDb.destroy();
+    }
   });
 });
 

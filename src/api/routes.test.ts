@@ -116,6 +116,40 @@ beforeAll(async () => {
     })
     .execute();
 
+  // A genuine plan-coverage gap: 'pro' ends 07-10, 'enterprise' doesn't
+  // start until 07-20 -- nothing covers 07-10..07-20. An event landing in
+  // that gap is what src/api/usage.ts:19-27's LEFT JOIN (vs. INNER) exists
+  // for. See the TODO test below.
+  await superuserDb
+    .insertInto('customers')
+    .values({ id: 'cust_plan_gap', plan: 'enterprise' })
+    .execute();
+  await sql`
+    insert into customer_plans (customer_id, plan, valid_period)
+    values
+      ('cust_plan_gap', 'pro', tstzrange('2026-07-01', '2026-07-10', '[)')),
+      ('cust_plan_gap', 'enterprise', tstzrange('2026-07-20', null, '[)'))
+  `.execute(superuserDb);
+  await superuserDb
+    .insertInto('usage_events')
+    .values({
+      customer_id: 'cust_plan_gap',
+      event_type: 'api_call',
+      endpoint: '/v1/reports/generate',
+      user_email: 'gap@acmeco.com',
+      duration_ms: 300,
+      status: 'success',
+      occurred_at: new Date('2026-07-15T12:00:00Z'),
+      metadata: JSON.stringify({}),
+      dedupe_key: deriveDedupeKey({
+        eventType: 'api_call',
+        endpoint: '/v1/reports/generate',
+        userEmail: 'gap@acmeco.com',
+        occurredAt: new Date('2026-07-15T12:00:00Z'),
+      }),
+    })
+    .execute();
+
   app = Fastify({ logger: false });
   registerErrorHandler(app);
   registerUsageSummaryRoute(app, appDb);
@@ -125,7 +159,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await app.close();
+  // Optional chaining: if beforeAll threw before `app` was assigned, this
+  // must not mask that failure behind "Cannot read properties of undefined".
+  await app?.close();
   await appDb.destroy();
   await adminDb.destroy();
   await superuserDb.destroy();
@@ -158,6 +194,17 @@ describe('GET /customers/:customerId/usage', () => {
     const body = response.json();
     const totalEvents = body.byPlan.reduce((sum: number, row: { eventCount: number }) => sum + row.eventCount, 0);
     expect(totalEvents).toBe(300);
+  });
+
+  test('an event with no covering plan interval surfaces under plan: null and still counts toward totals', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/customers/cust_plan_gap/usage?from=2026-07-01T00:00:00Z&to=2026-08-01T00:00:00Z',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.byPlan).toEqual([{ plan: null, eventCount: 1, totalDurationMs: 300 }]);
   });
 
   test('rejects from >= to with 400, not a query against an empty/inverted range', async () => {

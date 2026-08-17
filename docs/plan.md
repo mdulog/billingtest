@@ -266,19 +266,44 @@ Three endpoints, all scoped by `customer_id` and date range:
 - Commit: `feat: billing query endpoints`
 
 ## Phase 4 — Tests (30–40 min)
-- Ingestion: dedupe logic and malformed-record handling — these are the
-  parts with actual decisions in them, test those first if time is short.
-- Plan history derivation (unit, no DB): single-plan-throughout → one
-  unbounded interval; mid-period upgrade → two abutting intervals;
-  mid-period downgrade → rejected, one interval; casing/whitespace variants
-  → normalized before comparison, one interval.
-- The worked example, as an integration test: 100 events under `pro`, an
-  upgrade, 200 under `enterprise`, all inside one month. A month-wide
-  summary must return two rows (100/`pro`, 200/`enterprise`) — not 300 under
-  `enterprise`. This is the test that proves B3 was implemented, not just
-  documented.
-- At least one endpoint against a real DB (or test container), asserting on
-  response shape and values, not just status 200.
+
+**Status: the checklist below shipped inside the Phase 1–3 feature commits,
+not as a separate Phase 4 commit.** CLAUDE.md's "write tests in the same
+response as the implementation" meant each commit (`feat: usage_events
+ingestion and plan history derivation`, `feat: billing query endpoints`,
+etc.) already carried its own tests — dedupe logic and malformed-record
+handling (`src/ingest/dedupeKey.test.ts`, `src/ingest/normalize.test.ts`,
+`src/ingest/ingestEvents.test.ts`), plan history derivation unit tests
+(`src/ingest/planHistory.test.ts`: single-plan, mid-period upgrade,
+mid-period downgrade rejected, casing/whitespace normalization), the worked
+example as an HTTP-level integration test (`src/api/routes.test.ts`, 100
+`pro` + upgrade + 200 `enterprise` → two rows, not 300), and endpoint tests
+against a real DB asserting response shape/values (`src/api/routes.test.ts`,
+`src/db/rls.test.ts`). By the time this phase was revisited, all of it was
+green — there was no gap matching this list.
+
+What this phase's `test:` commit actually added, once the above was
+confirmed already in place:
+- **`npm test` didn't work on a clean checkout** — it silently required
+  `DATABASE_URL`/`ADMIN_DATABASE_URL`/`MIGRATE_DATABASE_URL` exported by
+  hand, with a `beforeAll` failure masked behind an unrelated `TypeError` in
+  `routes.test.ts`'s `afterAll`. Fixed via `vitest.config.ts`'s `test.env`
+  (same local-only dev values as `docker-compose.yml`/`.env.example`) and
+  `app?.close()`.
+- **The `LEFT JOIN` → `null` plan bucket** (Phase 3's "surfaces under a
+  `null` plan bucket instead of silently vanishing") had zero fixture
+  coverage — every existing plan-history fixture abuts with no gap, so an
+  `INNER JOIN` would have passed every test that existed. Added a
+  coverage-gap fixture and assertion in `routes.test.ts`.
+- **`SET LOCAL` not leaking across a pooled connection** (ADR 0001's core
+  claim) was asserted only incidentally — the two existing RLS tests proved
+  filtering works, not that they shared a physical connection. Added a
+  `max: 1` pool test in `rls.test.ts` that forces reuse and goes through the
+  real `withTenant()`.
+- **`errorHandler.ts`'s 503/500 branches and the A09 no-leaked-message
+  guarantee** were undocumented-by-test. Added `errorHandler.test.ts`.
+- **`config.ts`'s fail-fast on missing/invalid env** was undocumented-by-test.
+  Added `config.test.ts`.
 - Commit: `test: ingestion and endpoint coverage`
 
 ## Operational posture (material for write-up Q3)
