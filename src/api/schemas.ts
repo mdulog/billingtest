@@ -63,3 +63,76 @@ export function parseDateRange(query: DateRangeQuerystring): { from: Date; to: D
 }
 
 export class RangeValidationError extends Error {}
+
+// Shared response schemas -- feed both request validation (unchanged) and
+// the OpenAPI document @fastify/swagger derives from route schemas, which
+// is what the Scalar UI at /reference renders. Kept here so the three
+// route files each declare a status-code map, not the shape inline.
+export const errorResponseSchema = {
+  type: 'object',
+  properties: {
+    error: { type: 'string' },
+    message: { type: 'string' },
+  },
+} as const;
+
+export const usageSummaryResponseSchema = {
+  type: 'object',
+  properties: {
+    customerId: { type: 'string' },
+    from: { type: 'string', format: 'date-time' },
+    to: { type: 'string', format: 'date-time' },
+    byPlan: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          plan: { type: ['string', 'null'] },
+          eventCount: { type: 'integer' },
+          totalDurationMs: { type: 'integer' },
+        },
+      },
+    },
+  },
+} as const;
+
+export const endpointsResponseSchema = {
+  type: 'object',
+  properties: {
+    customerId: { type: 'string' },
+    from: { type: 'string', format: 'date-time' },
+    to: { type: 'string', format: 'date-time' },
+    endpoints: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          endpoint: { type: 'string' },
+          eventCount: { type: 'integer' },
+          totalDurationMs: { type: 'integer' },
+        },
+      },
+    },
+  },
+} as const;
+
+export const topCustomersResponseSchema = {
+  type: 'object',
+  properties: {
+    from: { type: 'string', format: 'date-time' },
+    to: { type: 'string', format: 'date-time' },
+    limit: { type: 'integer' },
+    customers: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          customerId: { type: 'string' },
+          plan: { type: ['string', 'null'] },
+          eventCount: { type: 'integer' },
+          totalDurationMs: { type: 'integer' },
+        },
+      },
+    },
+  },
+} as const;

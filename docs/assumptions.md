@@ -120,6 +120,7 @@ P8 into [ADR 0004](adr/0004-containerize-with-podman-compatible-images.md).
 | P8 | **Service and database both run in containers**; `docker compose up` is the only setup step on a reviewer's machine. Config via environment variables, fail fast if absent. | 🗣️ Owner-supplied | — |
 | P9 | The API connects as a **dedicated non-superuser role**, created in migrations. | 🔍 Inferred (forced by P8 + T4) | Superusers bypass RLS entirely, so connecting with the Postgres image's default credentials would make every tenant-isolation guarantee inert while still appearing to work. |
 | P6 | Git history should read as incremental decisions, not one upload. | 📄 Spec ("commit as if you were working in a real team") | — |
+| P10 | **API docs (`@fastify/swagger` + `@scalar/fastify-api-reference` at `/reference`, raw document at `/openapi.json`) ship in the runtime image**, not a build-only or dev-only dependency, and both routes are unauthenticated — consistent with T6 (no auth anywhere yet) but worth naming: they're also a schema-discovery surface once auth is added. | ⚠️ Invented | Contradicts Phase 0's "runtime image carries no compiler or dev dependencies" framing in spirit (it's ~27 extra packages in `dependencies`), traded for a reviewer being able to browse live docs without a separate doc build step. If that tradeoff is wrong, move both plugins/routes behind a `NODE_ENV !== 'production'` guard or drop them from the runtime target's dependency set entirely. |
 
 ---
 

@@ -5,7 +5,9 @@ import { withTenant } from '../db/connection.js';
 import {
   customerIdParamsSchema,
   dateRangeQuerystringSchema,
+  errorResponseSchema,
   parseDateRange,
+  usageSummaryResponseSchema,
   type CustomerIdParams,
   type DateRangeQuerystring,
 } from './schemas.js';
@@ -28,7 +30,22 @@ interface UsageByPlanRow {
 export function registerUsageSummaryRoute(app: FastifyInstance, db: Kysely<Database>): void {
   app.get<{ Params: CustomerIdParams; Querystring: DateRangeQuerystring }>(
     '/customers/:customerId/usage',
-    { schema: { params: customerIdParamsSchema, querystring: dateRangeQuerystringSchema } },
+    {
+      schema: {
+        tags: ['usage'],
+        summary: 'Per-plan usage summary for a customer',
+        description:
+          'Event counts and total duration_ms for one customer in [from, to), broken down by the plan in effect at each event\'s occurred_at. A `null` plan bucket means the event fell in a customer_plans coverage gap.',
+        params: customerIdParamsSchema,
+        querystring: dateRangeQuerystringSchema,
+        response: {
+          200: usageSummaryResponseSchema,
+          400: errorResponseSchema,
+          503: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
     async (request) => {
       const { customerId } = request.params;
       const { from, to } = parseDateRange(request.query);

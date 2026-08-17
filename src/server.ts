@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import FastifySwagger from '@fastify/swagger';
+import ScalarApiReference from '@scalar/fastify-api-reference';
 import { sql } from 'kysely';
 import { loadConfig } from './config.js';
 import { createDb, closeDb } from './db/connection.js';
@@ -14,6 +16,23 @@ async function main(): Promise<void> {
   // Separate connection, deliberately -- app_admin (BYPASSRLS, SELECT-only)
   // is used exclusively by /customers/top. See ADR 0007.
   const adminDb = createDb(config.adminDatabaseUrl, app.log);
+
+  // Generates the OpenAPI document from each route's `schema` -- no
+  // hand-maintained spec to drift from the code. The Scalar UI below reads
+  // this via fastify.swagger() (auto-detected -- see @scalar/fastify-api-
+  // reference's plugin precedence); /openapi.json exposes the same
+  // document as raw JSON for tooling that isn't a browser.
+  await app.register(FastifySwagger, {
+    openapi: {
+      info: {
+        title: 'Billing Test API',
+        description: 'Multi-tenant usage & billing query endpoints.',
+        version: '1.0.0',
+      },
+    },
+  });
+  await app.register(ScalarApiReference, { routePrefix: '/reference' });
+  app.get('/openapi.json', async () => app.swagger());
 
   registerErrorHandler(app);
 

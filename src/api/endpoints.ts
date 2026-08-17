@@ -5,6 +5,8 @@ import { withTenant } from '../db/connection.js';
 import {
   customerIdParamsSchema,
   dateRangeQuerystringSchema,
+  endpointsResponseSchema,
+  errorResponseSchema,
   parseDateRange,
   type CustomerIdParams,
   type DateRangeQuerystring,
@@ -22,7 +24,22 @@ interface EndpointUsageRow {
 export function registerEndpointsRoute(app: FastifyInstance, db: Kysely<Database>): void {
   app.get<{ Params: CustomerIdParams; Querystring: DateRangeQuerystring }>(
     '/customers/:customerId/endpoints',
-    { schema: { params: customerIdParamsSchema, querystring: dateRangeQuerystringSchema } },
+    {
+      schema: {
+        tags: ['usage'],
+        summary: 'Per-endpoint usage breakdown for a customer',
+        description:
+          'Event counts and total duration_ms per endpoint for one customer in [from, to), sorted by event count descending.',
+        params: customerIdParamsSchema,
+        querystring: dateRangeQuerystringSchema,
+        response: {
+          200: endpointsResponseSchema,
+          400: errorResponseSchema,
+          503: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
     async (request) => {
       const { customerId } = request.params;
       const { from, to } = parseDateRange(request.query);

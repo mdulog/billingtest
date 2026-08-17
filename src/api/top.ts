@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { sql, type Kysely } from 'kysely';
 import type { Database } from '../db/types.js';
-import { parseDateRange, topQuerystringSchema, type TopQuerystring } from './schemas.js';
+import {
+  errorResponseSchema,
+  parseDateRange,
+  topCustomersResponseSchema,
+  topQuerystringSchema,
+  type TopQuerystring,
+} from './schemas.js';
 
 interface TopCustomerRow {
   customer_id: string;
@@ -20,7 +26,21 @@ interface TopCustomerRow {
 export function registerTopCustomersRoute(app: FastifyInstance, adminDb: Kysely<Database>): void {
   app.get<{ Querystring: TopQuerystring }>(
     '/customers/top',
-    { schema: { querystring: topQuerystringSchema } },
+    {
+      schema: {
+        tags: ['admin'],
+        summary: 'Top customers by usage, ranked across all tenants',
+        description:
+          'Cross-tenant admin/ops view (app_admin, BYPASSRLS) -- not RLS-scoped, and not a per-period billing figure. `plan` is customers.plan, the customer\'s current standing, not the plan in effect during [from, to).',
+        querystring: topQuerystringSchema,
+        response: {
+          200: topCustomersResponseSchema,
+          400: errorResponseSchema,
+          503: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
     async (request) => {
       const { from, to } = parseDateRange(request.query);
       const { limit } = request.query;
