@@ -12,6 +12,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "migrate": "tsx src/db/migrate.ts",
+    "ingest": "tsx src/ingest/ingest.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

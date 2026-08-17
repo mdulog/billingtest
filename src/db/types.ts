@@ -6,6 +6,7 @@ export interface Database {
   customers: CustomersTable;
   usage_events: UsageEventsTable;
   customer_plans: CustomerPlansTable;
+  ingest_rejects: IngestRejectsTable;
 }
 
 export interface CustomersTable {
@@ -33,6 +34,10 @@ export interface UsageEventsTable {
   // ISO string is accepted on insert/update.
   occurred_at: ColumnType<Date, Date | string, Date | string>;
   metadata: JSONColumnType<Record<string, unknown>>;
+  // Derived at ingest time from normalized identifying fields, excluding
+  // metadata -- see ADR 0005. Paired with customer_id in a UNIQUE
+  // constraint (migration 003), not unique on its own.
+  dedupe_key: string;
 }
 
 export interface CustomerPlansTable {
@@ -45,4 +50,14 @@ export interface CustomerPlansTable {
   // that construct one should use `tstzrange(...)` in SQL rather than
   // building the literal by hand in application code.
   valid_period: string;
+}
+
+export interface IngestRejectsTable {
+  id: Generated<string>;
+  // Nullable: I6 rejects events with no customer_id at all, so this table
+  // can't require one -- see migration 003.
+  customer_id: string | null;
+  reason: string;
+  raw_event: JSONColumnType<Record<string, unknown>>;
+  rejected_at: Generated<ColumnType<Date, Date | string | undefined, never>>;
 }

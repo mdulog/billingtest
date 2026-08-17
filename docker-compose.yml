@@ -54,6 +54,22 @@ services:
       db:
         condition: service_healthy
 
+  ingest:
+    build:
+      context: .
+      target: ingest
+    environment:
+      # Same bootstrap superuser as migrate, deliberately -- both RLS
+      # policies (migration 001) are USING-only, so they apply to INSERT
+      # too. Ingestion writes rows for many customers in one run, so it
+      # can't run as app_user without re-issuing SET LOCAL per customer
+      # group; connecting as the superuser bypasses RLS unconditionally
+      # instead. See ADR 0005 and docs/assumptions.md.
+      INGEST_DATABASE_URL: postgres://postgres:postgres_dev_only@db:5432/billingtest
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   api:
     build:
       context: .
@@ -85,6 +101,12 @@ services:
       # retry-on-connect in src/db/connection.ts) rather than trusting this
       # condition under Podman.
       migrate:
+        condition: service_completed_successfully
+      # Same caveat as migrate above under podman-compose. Ordered after
+      # ingest (not just migrate) so `docker compose up` leaves a
+      # reviewer's first request hitting seeded data, not empty tables --
+      # matches plan.md's "docker compose up is the only setup step".
+      ingest:
         condition: service_completed_successfully
 
 volumes:

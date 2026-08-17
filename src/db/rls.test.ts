@@ -5,6 +5,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Pool } from 'pg';
 import { beforeAll, afterAll, describe, expect, test } from 'vitest';
 import type { Database } from './types.js';
+import { deriveDedupeKey } from '../ingest/dedupeKey.js';
 
 // Two connections, deliberately: app_user is the role the API actually runs
 // as (subject to RLS), superuser is the migration/bootstrap role (bypasses
@@ -72,6 +73,12 @@ beforeAll(async () => {
         // would JSON.stringify a plain object for us either way, but
         // stringifying explicitly keeps the declared type honest.
         metadata: JSON.stringify({ duration_ms: 214, status: 'success' }),
+        dedupe_key: deriveDedupeKey({
+          eventType: 'api_call',
+          endpoint: '/v1/reports/generate',
+          userEmail: 'jane@acmeco.com',
+          occurredAt: new Date('2026-07-14T18:32:11Z'),
+        }),
       },
       {
         customer_id: 'cust_b',
@@ -82,6 +89,12 @@ beforeAll(async () => {
         status: 'success',
         occurred_at: new Date('2026-07-14T18:33:00Z'),
         metadata: JSON.stringify({ duration_ms: 90, status: 'success' }),
+        dedupe_key: deriveDedupeKey({
+          eventType: 'api_call',
+          endpoint: '/v1/reports/generate',
+          userEmail: 'sam@northwind.io',
+          occurredAt: new Date('2026-07-14T18:33:00Z'),
+        }),
       },
     ])
     .execute();

@@ -1,7 +1,6 @@
 # 5. Derived dedupe key, since the source has no event ID
 
-**Status:** Accepted (architecture) — **one sub-decision left open**, see
-Consequences
+**Status:** Accepted — fully resolved (see Decision Outcome for I2)
 **Date:** 2026-08-16
 **Related:** `docs/assumptions.md` D2, I1, I2, I3 · `docs/plan.md` Phase 2
 
@@ -48,27 +47,50 @@ ALTER TABLE usage_events
   UNIQUE (customer_id, dedupe_key);
 ```
 
-Insertion uses `ON CONFLICT (customer_id, dedupe_key) DO NOTHING`, making
-re-running the ingestion loader safe at any time — a crash mid-run costs
-nothing but re-processing time.
+**I2, resolved:** the key hashes `event_type`, `endpoint`, `user_email`,
+and `occurred_at` (all post-normalization, so casing/whitespace variants
+of the same event still collide) — **`metadata` is excluded**. A
+redelivery that only corrects `duration_ms`/`status` therefore hits the
+same key and is treated as a correction to the same billable event, not a
+second one.
+
+The honest option set turned out to be three, not two, once it was clear
+`duration_ms`/`status` live *inside* `metadata` in the source data:
+
+1. Exclude metadata, `ON CONFLICT ... DO NOTHING` — one row, but the
+   *first* delivery always wins; a corrected `duration_ms` in a later
+   redelivery is silently discarded, not merged.
+2. Include metadata in the hash, `ON CONFLICT ... DO NOTHING` — a
+   redelivery with any metadata drift becomes a second billable event.
+   Rejected: any jitter in metadata defeats the key against exactly the
+   redelivery case it exists to catch, and usage/billed counts inflate on
+   every redelivery.
+3. **Chosen.** Exclude metadata, `ON CONFLICT (customer_id, dedupe_key)
+   DO UPDATE SET duration_ms = excluded.duration_ms, status =
+   excluded.status, metadata = excluded.metadata`. One row per event, and
+   the most recent delivery's correction wins instead of being dropped.
+
+Insertion uses this `DO UPDATE`, which also makes re-running the
+ingestion loader safe at any time (idempotent, not merely
+duplicate-proof) — a crash mid-run, or a genuine redelivery, costs
+nothing but the write itself.
 
 ## Consequences
 
 **Good:**
-- Ingestion is idempotent by construction: the database refuses the
-  duplicate, rather than the application promising not to insert one.
-- Makes duplicate handling an auditable, testable property (unit-testable
-  without a database) instead of an implicit assumption.
+- Ingestion is idempotent by construction: the database resolves the
+  conflict deterministically, rather than the application promising not
+  to insert a duplicate.
+- Corrections are actually applied, not silently dropped — "latest
+  delivery wins" is a real, testable property
+  (`src/ingest/ingestEvents.test.ts`), not an implicit assumption.
+- Makes duplicate handling auditable and unit-testable without a database
+  (`src/ingest/dedupeKey.test.ts`, `normalize.test.ts`).
 
-**Bad / open:**
-- **What fields the key is derived from is not yet decided**, and it's
-  consequential: including `metadata` in the hash means a redelivered
-  event with a corrected `duration_ms` counts as a *distinct* billable
-  event; excluding it treats the redelivery as *the same* event. These
-  produce different billed totals for the same input data, and there is
-  no evidence in the spec pointing either way — this is deliberately left
-  as an implementation-time decision (`docs/plan.md` Phase 2), not
-  resolved here, so it doesn't get decided by default.
+**Bad / accepted:**
+- "Latest delivery wins" assumes later-in-file means later-in-time for
+  same-identity records. The source has no delivery timestamp to
+  disambiguate otherwise; file order is the only signal available.
 - The derived key can only dedupe against fields that exist and are
   normalized consistently — a malformed record that fails normalization
   before a key can be derived goes to `ingest_rejects` instead, on a

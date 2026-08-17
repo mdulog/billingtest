@@ -217,12 +217,13 @@ requirement #1's "FK vs. denormalized for read performance."
 
 ## Phase 2 — Ingestion (40–50 min)
 - Read JSON, validate/normalize, upsert customers, insert events.
-- **Owner decision: the dedupe key.** The source has no `event_id`, so the key
-  must be derived. The fork: include `metadata` in the hash (a redelivery with
-  a corrected `duration_ms` counts as a distinct billable event) or exclude it
-  (same event, deduped). No right answer — pick one and defend it.
-  Enforced as `UNIQUE (customer_id, dedupe_key)` + `ON CONFLICT DO NOTHING`,
-  which makes re-running the loader idempotent.
+- **Owner decision: the dedupe key — resolved.** The source has no `event_id`,
+  so the key must be derived. Chosen: exclude `metadata` from the hash, and
+  use `ON CONFLICT (customer_id, dedupe_key) DO UPDATE` (not `DO NOTHING`) so
+  a redelivery with a corrected `duration_ms` overwrites the original instead
+  of being silently discarded. See ADR 0005 for the three-option comparison.
+  Enforced as `UNIQUE (customer_id, dedupe_key)`, which makes re-running the
+  loader idempotent.
 - Rejects go to an `ingest_rejects` table with a reason code rather than being
   dropped — the reject-rate-by-reason counter is the operational metric for
   write-up question 3.
@@ -230,7 +231,6 @@ requirement #1's "FK vs. denormalized for read performance."
   duration" and "malformed record" are different things; conflating them
   rejects valid data.
 - Wrap the batch insert in a transaction.
-- Commit: `feat: usage_events ingestion`
 
 **Plan history derivation, same phase.** Pure function over one customer's
 events ordered by `occurred_at`: walk in time order, and on a plan change
@@ -241,7 +241,14 @@ downgrades. Keep it pure (no DB) so it unit-tests directly; the derived
 intervals then get inserted into `customer_plans` inside the same ingest
 transaction. This is where the exclusion constraint gets exercised for
 real, not just at the DDL level.
-- Commit: `feat: derive plan history from usage events`
+
+Event ingestion and plan-history derivation land as one commit, not two —
+`ingestEvents.ts` calls `derivePlanHistory()` inline as part of the same
+per-customer loop inside the single ingest transaction (I4), so there's no
+independently-working intermediate state between "events insert" and
+"plan history derives" to split a commit boundary at without reverting
+working, already-tested code.
+- Commit: `feat: usage_events ingestion and plan history derivation`
 
 ## Phase 3 — HTTP API (45–60 min)
 Three endpoints, all scoped by `customer_id` and date range:
